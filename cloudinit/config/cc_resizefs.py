@@ -10,6 +10,7 @@
 
 import errno
 import os
+import re
 import stat
 from textwrap import dedent
 
@@ -17,6 +18,7 @@ from cloudinit.config.schema import (
     get_schema_doc, validate_cloudconfig_schema)
 from cloudinit.settings import PER_ALWAYS
 from cloudinit import subp
+from cloudinit import temp_utils
 from cloudinit import util
 
 NOBLOCK = "noblock"
@@ -81,7 +83,60 @@ def _resize_ufs(mount_point, devpth):
     return ('growfs', '-y', mount_point)
 
 
+def _resize_zfs_growpart_for_illumos(devpth):
+    """Due to https://www.illumos.org/issues/14022, it is currently
+    necessary to grow the underlying partition before growing the
+    ZFS pool"""
+
+    def prtvtoc(devpth):
+        sectorsize = sectorcount = None
+        partitions = {}
+        (out, _) = subp.subp(['/usr/sbin/prtvtoc',
+            f'/dev/dsk/{devpth}'], rcs=[0])
+        for line in out.splitlines():
+            if not sectorsize:
+                m = re.search(rf'^\*\s+(\d+)\sbytes\/sector$', out)
+                if m:
+                    sectorsize = m.group(1)
+                    continue
+            if not sectorcount:
+                m = re.search(rf'^\*\s+(\d+)\ssectors$', out)
+                if m:
+                    sectorcount = m.group(1)
+                    continue
+            if line.startswith('*'):
+                continue
+            (pid, tag, flags, start, count, end) = line.split()
+            partitions[pid] = {
+                'id': pid,
+                'tag': tag,
+                'flags': flags,
+                'start': start,
+                'count': count,
+                'end': end,
+            }
+        return (sectorsize, sectorcount, partitions)
+
+    sectorsize, sectorcount, partitions = prtvtoc(devpth)
+
+    import pprint
+    pprint.pprint(partitions)
+
+
+    #(_, tfile) = temp_utils.mkstemp(prefix='resize-', suffix="")
+    #util.write_file(tfile, content="partition\nexpand\nlabel\nquit\nquit\n")
+    #try:
+    #    (out, _err) = subp.subp(['/usr/sbin/format', '-d', devpth,
+    #        '-f', tfile])
+    #except subp.ProcessExecutionError as e:
+    #    LOG.warning(f"Failed to resize {devpth} for illumos")
+
+    #util.del_file(tfile)
+
+
 def _resize_zfs(mount_point, devpth):
+    if util.is_illumos():
+        _resize_zfs_growpart_for_illumos(devpth)
     return ('zpool', 'online', '-e', mount_point, devpth)
 
 
@@ -108,6 +163,18 @@ def _can_skip_resize_ufs(mount_point, devpth):
     return False
 
 
+def _can_skip_resize_zfs(zpool, devpth):
+    if util.is_illumos():
+        # ZFS resize is temporarily disabled for illumos
+        return True
+    try:
+        (out, _err) = subp.subp(['zpool', 'get', '-Hp', '-o', 'value',
+            'expandsz', zpool])
+        return out.strip() == '-'
+    except subp.ProcessExecutionError as e:
+        return False
+
+
 # Do not use a dictionary as these commands should be able to be used
 # for multiple filesystem types if possible, e.g. one command for
 # ext2, ext3 and ext4.
@@ -121,7 +188,8 @@ RESIZE_FS_PREFIXES_CMDS = [
 ]
 
 RESIZE_FS_PRECHECK_CMDS = {
-    'ufs': _can_skip_resize_ufs
+    'ufs': _can_skip_resize_ufs,
+    'zfs': _can_skip_resize_zfs,
 }
 
 
@@ -230,7 +298,12 @@ def handle(name, cfg, _cloud, log, args):
     info = "dev=%s mnt_point=%s path=%s" % (devpth, mount_point, resize_what)
     log.debug("resize_info: %s" % info)
 
-    devpth = maybe_get_writable_device_path(devpth, info, log)
+    if util.is_illumos() and fs_type == 'zfs':
+        # On illumos ZFS, the devices are just bare words like 'c0t0d0'
+        # which can be used directly as arguments for the resize.
+        pass
+    else:
+        devpth = maybe_get_writable_device_path(devpth, info, log)
     if not devpth:
         return  # devpath was not a writable block device
 

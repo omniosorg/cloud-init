@@ -52,6 +52,7 @@ OSFAMILIES = {
     'redhat': ['almalinux', 'amazon', 'centos', 'cloudlinux', 'eurolinux',
                'fedora', 'openEuler', 'photon', 'rhel', 'rocky', 'virtuozzo'],
     'suse': ['opensuse', 'sles'],
+    'illumos': ['omnios'],
 }
 
 LOG = logging.getLogger(__name__)

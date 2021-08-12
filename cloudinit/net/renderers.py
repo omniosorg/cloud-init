@@ -4,6 +4,7 @@ from typing import List, Tuple, Type
 
 from . import eni
 from . import freebsd
+from . import illumos
 from . import netbsd
 from . import netplan
 from . import networkd
@@ -15,6 +16,7 @@ from . import sysconfig
 NAME_TO_RENDERER = {
     "eni": eni,
     "freebsd": freebsd,
+    "illumos": illumos,
     "netbsd": netbsd,
     "netplan": netplan,
     "networkd": networkd,
@@ -23,7 +25,7 @@ NAME_TO_RENDERER = {
 }
 
 DEFAULT_PRIORITY = ["eni", "sysconfig", "netplan", "freebsd",
-                    "netbsd", "openbsd", "networkd"]
+                    "netbsd", "openbsd", "networkd", "illumos"]
 
 
 def search(
