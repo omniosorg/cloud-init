@@ -13,13 +13,13 @@
 # This file is part of cloud-init. See LICENSE file for license information.
 
 import os
-from socket import inet_ntoa, getaddrinfo, gaierror
+from socket import getaddrinfo, gaierror
 from struct import pack
 import time
 
 from cloudinit import ec2_utils as ec2
 from cloudinit import log as logging
-from cloudinit.net import dhcp
+from cloudinit.net import dhcp, get_default_gateway
 from cloudinit import sources
 from cloudinit import url_helper as uhelp
 from cloudinit import subp
@@ -166,19 +166,6 @@ def get_data_server():
         return None
     else:
         return addrinfo[0][4][0]  # return IP
-
-
-def get_default_gateway():
-    # Returns the default gateway ip address in the dotted format.
-    lines = util.load_file("/proc/net/route").splitlines()
-    for line in lines:
-        items = line.split("\t")
-        if items[1] == "00000000":
-            # Found the default route, get the gateway
-            gw = inet_ntoa(pack("<L", int(items[2], 16)))
-            LOG.debug("Found default route, gateway is %s", gw)
-            return gw
-    return None
 
 
 def get_dhclient_d():
