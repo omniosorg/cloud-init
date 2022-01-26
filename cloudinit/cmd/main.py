@@ -36,7 +36,8 @@ from cloudinit import warnings
 from cloudinit import reporting
 from cloudinit.reporting import events
 
-from cloudinit.settings import PER_INSTANCE, PER_ALWAYS, PER_ONCE, CLOUD_CONFIG
+from cloudinit.settings import (PER_INSTANCE, PER_ALWAYS, PER_ONCE,
+                                CLOUD_CONFIG, RUN_CLOUD_CONFIG)
 
 from cloudinit import atomic_helper
 
@@ -686,7 +687,7 @@ def status_wrapper(name, args, data_d=None, link_d=None):
     if data_d is None:
         data_d = os.path.normpath("/var/lib/cloud/data")
     if link_d is None:
-        link_d = os.path.normpath("/run/cloud-init")
+        link_d = os.path.dirname(os.path.normpath(RUN_CLOUD_CONFIG))
 
     status_path = os.path.join(data_d, "status.json")
     status_link = os.path.join(link_d, "status.json")

@@ -1,6 +1,7 @@
 import abc
 import logging
 import os
+import re
 
 from cloudinit import net, subp, util
 
@@ -191,6 +192,33 @@ class BSDNetworking(Networking):
 
     def try_set_link_up(self, devname: DeviceName) -> bool:
         raise NotImplementedError()
+
+
+class illumosNetworking(Networking):
+    """Implementation of networking functionality for illumos."""
+
+    def is_physical(self, devname: DeviceName) -> bool:
+        raise NotImplementedError()
+
+    def settle(self, *, exists=None) -> None:
+        """illumos has no equivalent to `udevadm settle`; noop."""
+
+    def try_set_link_up(self, devname: DeviceName) -> bool:
+        raise NotImplementedError()
+
+    def generate_fallback_config(
+        self, *, blacklist_drivers=None, config_driver: bool = False
+    ):
+        nconf = {'config': [], 'version': 1}
+        (out, _) = subp.subp(['/usr/sbin/ipadm', 'show-addr'])
+        for mac, name in net.get_interfaces_by_mac().items():
+            if re.search(rf'^{name}/', out, re.MULTILINE):
+                # Address already configured
+                continue
+            nconf['config'].append(
+                {'type': 'physical', 'name': name,
+                 'mac_address': mac, 'subnets': [{'type': 'dhcp'}]})
+        return nconf
 
 
 class LinuxNetworking(Networking):

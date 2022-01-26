@@ -53,6 +53,7 @@ OSFAMILIES = {
         "virtuozzo",
     ],
     "suse": ["opensuse", "sles"],
+    "illumos": ["omnios"],
 }
 
 LOG = logging.getLogger(__name__)

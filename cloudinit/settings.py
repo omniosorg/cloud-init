@@ -8,13 +8,18 @@
 #
 # This file is part of cloud-init. See LICENSE file for license information.
 
+import platform
+
 # Set and read for determining the cloud config file location
 CFG_ENV_NAME = "CLOUD_CFG"
 
 # This is expected to be a yaml formatted file
 CLOUD_CONFIG = "/etc/cloud/cloud.cfg"
 
-RUN_CLOUD_CONFIG = "/run/cloud-init/cloud.cfg"
+if platform.system() == "SunOS":
+    RUN_CLOUD_CONFIG = "/var/run/cloud-init/cloud.cfg"
+else:
+    RUN_CLOUD_CONFIG = "/run/cloud-init/cloud.cfg"
 
 # What u get if no config is provided
 CFG_BUILTIN = {
