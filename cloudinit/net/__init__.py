@@ -12,6 +12,7 @@ import logging
 import os
 import re
 from typing import Any, Dict
+from socket import inet_ntoa
 
 from cloudinit import subp, util
 from cloudinit.net.network_state import mask_to_net_prefix
@@ -46,6 +47,10 @@ def natural_sort_key(s, _nsre=re.compile("([0-9]+)")):
         int(text) if text.isdigit() else text.lower()
         for text in re.split(_nsre, s)
     ]
+
+
+def zeropad_mac(mac):
+    return ':'.join(l.zfill(2) for l in mac.split(':'))
 
 
 def get_sys_class_path():
@@ -118,7 +123,32 @@ def read_sys_net_int(iface, field):
         return None
 
 
+def illumos_linkprop(devname, prop):
+    (out, _err) = subp.subp(['/usr/sbin/dladm', 'show-link', '-p',
+        '-o', prop, devname])
+    return out.strip()
+
+
+def illumos_intf_in_use(devname):
+    (out, _err) = subp.subp(['/usr/sbin/ipadm', 'show-addr', '-p',
+        '-o', 'addrobj'])
+    for addr in out.splitlines():
+        if addr.startswith(f'{devname}/'):
+            return True
+    return False
+
+
+def illumos_delete_unused_intf(devname):
+    if not illumos_intf_in_use(devname):
+        subp.subp(['/usr/sbin/ipadm', 'delete-if', devname])
+
+
 def is_up(devname):
+    if util.is_illumos():
+        # This function is used to check if the network is already up and
+        # therefore to avoid using ephemeral configuration. On illumos,
+        # check if there are any configured addresses.
+        return illumos_intf_in_use(devname)
     # The linux kernel says to consider devices in 'unknown'
     # operstate as up for the purposes of network configuration. See
     # Documentation/networking/operstates.txt in the kernel source.
@@ -127,15 +157,21 @@ def is_up(devname):
 
 
 def is_bridge(devname):
+    if util.is_illumos():
+        return illumos_linkprop(devname, 'CLASS') == "bridge"
     return os.path.exists(sys_dev_path(devname, "bridge"))
 
 
 def is_bond(devname):
+    if util.is_illumos():
+        return illumos_linkprop(devname, 'CLASS') == "aggr"
     return os.path.exists(sys_dev_path(devname, "bonding"))
 
 
 def get_master(devname):
     """Return the master path for devname, or None if no master"""
+    if util.is_illumos():
+        return None
     path = sys_dev_path(devname, path="master")
     if os.path.exists(path):
         return path
@@ -347,6 +383,13 @@ def is_vlan(devname):
 
 def device_driver(devname):
     """Return the device driver for net device named 'devname'."""
+    if util.is_illumos():
+        try:
+            (out, _err) = subp.subp(['/usr/sbin/dladm', 'show-phys',
+                '-mp', '-o', 'CLIENT', devname])
+            return out.strip().rstrip('1234567890')
+        except subp.ProcessExecutionError as e:
+            return None
     driver = None
     driver_path = sys_dev_path(devname, "device/driver")
     # driver is a symlink to the driver *dir*
@@ -366,7 +409,7 @@ def device_devid(devname):
 
 
 def get_devicelist():
-    if util.is_FreeBSD() or util.is_DragonFlyBSD():
+    if util.is_FreeBSD() or util.is_DragonFlyBSD() or util.is_illumos():
         return list(get_interfaces_by_mac().values())
 
     try:
@@ -389,17 +432,44 @@ def is_disabled_cfg(cfg):
     return cfg.get("config") == "disabled"
 
 
+def get_default_gateway():
+    """Returns the default gateway ip address in the dotted format."""
+    if util.is_illumos():
+        return get_default_gateway_on_illumos()
+    lines = util.load_file("/proc/net/route").splitlines()
+    for line in lines:
+        items = line.split("\t")
+        if items[1] == "00000000":
+            # Found the default route, get the gateway
+            gw = inet_ntoa(pack("<L", int(items[2], 16)))
+            LOG.debug("Found default route, gateway is %s", gw)
+            return gw
+    return None
+
+
+def get_default_gateway_on_illumos():
+    try:
+        (out, _) = subp.subp(['route', '-n', 'get', 'default'])
+        m = re.search(rf'^\s+gateway:\s+([0-9.]+)', out, re.MULTILINE)
+        if m:
+            return m.group(1)
+    except:
+        pass
+    return None
+
+
 def find_fallback_nic(blacklist_drivers=None):
     """Return the name of the 'fallback' network device."""
     if util.is_FreeBSD() or util.is_DragonFlyBSD():
         return find_fallback_nic_on_freebsd(blacklist_drivers)
-    elif util.is_NetBSD() or util.is_OpenBSD():
-        return find_fallback_nic_on_netbsd_or_openbsd(blacklist_drivers)
+    elif util.is_NetBSD() or util.is_OpenBSD() or util.is_illumos():
+        return find_fallback_nic_on_netbsd_or_openbsd_or_illumos(
+            blacklist_drivers)
     else:
         return find_fallback_nic_on_linux(blacklist_drivers)
 
 
-def find_fallback_nic_on_netbsd_or_openbsd(blacklist_drivers=None):
+def find_fallback_nic_on_netbsd_or_openbsd_or_illumos(blacklist_drivers=None):
     values = list(
         sorted(get_interfaces_by_mac().values(), key=natural_sort_key)
     )
@@ -650,7 +720,7 @@ def _get_current_rename_info(check_downable=True):
             "up": is_up(name),
         }
 
-    if check_downable:
+    if check_downable and not util.is_illumos():
         nmatch = re.compile(r"[0-9]+:\s+(\w+)[@:]")
         ipv6, _err = subp.subp(
             ["ip", "-6", "addr", "show", "permanent", "scope", "global"],
@@ -695,13 +765,20 @@ def _rename_interfaces(
         return dict((data["name"], data) for data in cur_info.values())
 
     def rename(cur, new):
-        subp.subp(["ip", "link", "set", cur, "name", new], capture=True)
+        if util.is_illumos():
+            if not illumos_intf_in_use(cur):
+                subp.subp(["/usr/sbin/dladm", "rename-link", cur, new],
+                    capture=True)
+        else:
+            subp.subp(["ip", "link", "set", cur, "name", new], capture=True)
 
     def down(name):
-        subp.subp(["ip", "link", "set", name, "down"], capture=True)
+        if not util.is_illumos():
+            subp.subp(["ip", "link", "set", name, "down"], capture=True)
 
     def up(name):
-        subp.subp(["ip", "link", "set", name, "up"], capture=True)
+        if not util.is_illumos():
+            subp.subp(["ip", "link", "set", name, "up"], capture=True)
 
     ops = []
     errors = []
@@ -831,6 +908,12 @@ def _rename_interfaces(
 
 def get_interface_mac(ifname):
     """Returns the string value of an interface's MAC Address"""
+    if util.is_illumos():
+        (out, _) = subp.subp(['/usr/sbin/dladm', 'show-phys', '-m',
+        '-o', 'ADDRESS', ifname])
+        for line in out.splitlines():
+            if ':' in line:
+                return zeropad_mac(line)
     path = "address"
     if os.path.isdir(sys_dev_path(ifname, "bonding_slave")):
         # for a bond slave, get the nic's hwaddress, not the address it
@@ -864,6 +947,10 @@ def get_interfaces_by_mac(blacklist_drivers=None) -> dict:
         )
     elif util.is_OpenBSD():
         return get_interfaces_by_mac_on_openbsd(
+            blacklist_drivers=blacklist_drivers
+        )
+    elif util.is_illumos():
+        return get_interfaces_by_mac_on_illumos(
             blacklist_drivers=blacklist_drivers
         )
     else:
@@ -929,6 +1016,18 @@ def get_interfaces_by_mac_on_openbsd(blacklist_drivers=None) -> dict():
         if m:
             fields = m.groupdict()
             ret[fields["mac"]] = fields["ifname"]
+    return ret
+
+
+def get_interfaces_by_mac_on_illumos(blacklist_drivers=None) -> dict():
+    ret = {}
+    (out, _) = subp.subp(['/usr/sbin/dladm', 'show-phys', '-m',
+        '-o', 'LINK,ADDRESS'])
+    for line in out.splitlines():
+        (link, mac) = line.split()
+        if ':' not in mac:
+            continue
+        ret[zeropad_mac(mac)] = link
     return ret
 
 
@@ -1170,9 +1269,18 @@ class EphemeralIPv4Network(object):
         """Teardown anything we set up."""
         for cmd in self.cleanup_cmds:
             subp.subp(cmd, capture=True)
+        if util.is_illumos():
+            illumos_delete_unused_intf(self.interface)
 
     def _delete_address(self, address, prefix):
         """Perform the ip command to remove the specified address."""
+        if util.is_illumos():
+            subp.subp(
+                ['/usr/sbin/ipadm', 'delete-addr',
+                 f'{self.interface}/eph'], capture=True)
+            illumos_delete_unused_intf(self.interface)
+            return
+
         subp.subp(
             [
                 "ip",
@@ -1197,24 +1305,33 @@ class EphemeralIPv4Network(object):
             self.broadcast,
         )
         try:
-            subp.subp(
-                [
-                    "ip",
-                    "-family",
-                    "inet",
-                    "addr",
-                    "add",
-                    cidr,
-                    "broadcast",
-                    self.broadcast,
-                    "dev",
-                    self.interface,
-                ],
-                capture=True,
-                update_env={"LANG": "C"},
-            )
+            if util.is_illumos():
+                subp.subp(['/usr/sbin/ipadm', 'create-if', self.interface],
+                    rcs=[0,1])
+                subp.subp(
+                    ['/usr/sbin/ipadm', 'create-addr', '-t', '-T', 'static',
+                     '-a', f'local={cidr}', f'{self.interface}/eph'],
+                    capture=True)
+            else:
+                subp.subp(
+                    [
+                        "ip",
+                        "-family",
+                        "inet",
+                        "addr",
+                        "add",
+                        cidr,
+                        "broadcast",
+                        self.broadcast,
+                        "dev",
+                        self.interface,
+                    ],
+                    capture=True,
+                    update_env={"LANG": "C"},
+                )
         except subp.ProcessExecutionError as e:
-            if "File exists" not in e.stderr:
+            if ("File exists" not in e.stderr and
+                "object already exists" not in e.stderr):
                 raise
             LOG.debug(
                 "Skip ephemeral network setup, %s already has address %s",
@@ -1222,6 +1339,10 @@ class EphemeralIPv4Network(object):
                 self.ip,
             )
         else:
+            if util.is_illumos():
+                self.cleanup_cmds.append(
+                    ['/usr/sbin/ipadm', 'delete-addr', f'{self.interface}/eph'])
+                return
             # Address creation success, bring up device and queue cleanup
             subp.subp(
                 [
@@ -1268,23 +1389,34 @@ class EphemeralIPv4Network(object):
             via_arg = []
             if gateway != "0.0.0.0":
                 via_arg = ["via", gateway]
-            subp.subp(
-                ["ip", "-4", "route", "append", net_address]
-                + via_arg
-                + ["dev", self.interface],
-                capture=True,
-            )
-            self.cleanup_cmds.insert(
-                0,
-                ["ip", "-4", "route", "del", net_address]
-                + via_arg
-                + ["dev", self.interface],
-            )
+            if util.is_illumos():
+                subp.subp(
+                    ['route', 'add', '-inet', net_address, gateway],
+                    capture=True)
+                self.cleanup_cmds.insert(
+                    0, ['route', 'delete', '-inet', net_address, gateway])
+            else:
+                subp.subp(
+                    ["ip", "-4", "route", "append", net_address]
+                    + via_arg
+                    + ["dev", self.interface],
+                    capture=True,
+                )
+                self.cleanup_cmds.insert(
+                    0,
+                    ["ip", "-4", "route", "del", net_address]
+                    + via_arg
+                    + ["dev", self.interface],
+                )
 
     def _bringup_router(self):
         """Perform the ip commands to fully setup the router if needed."""
         # Check if a default route exists and exit if it does
-        out, _ = subp.subp(["ip", "route", "show", "0.0.0.0/0"], capture=True)
+        if util.is_illumos():
+            out, _ = subp.subp(['netstat', '-rnc', '-f', 'inet'], capture=True)
+        else:
+            out, _ = subp.subp(["ip", "route", "show", "0.0.0.0/0"],
+                capture=True)
         if "default" in out:
             LOG.debug(
                 "Skip ephemeral route setup. %s already has default route: %s",
@@ -1292,55 +1424,68 @@ class EphemeralIPv4Network(object):
                 out.strip(),
             )
             return
-        subp.subp(
-            [
-                "ip",
-                "-4",
-                "route",
-                "add",
-                self.router,
-                "dev",
-                self.interface,
-                "src",
-                self.ip,
-            ],
-            capture=True,
-        )
-        self.cleanup_cmds.insert(
-            0,
-            [
-                "ip",
-                "-4",
-                "route",
-                "del",
-                self.router,
-                "dev",
-                self.interface,
-                "src",
-                self.ip,
-            ],
-        )
-        subp.subp(
-            [
-                "ip",
-                "-4",
-                "route",
-                "add",
-                "default",
-                "via",
-                self.router,
-                "dev",
-                self.interface,
-            ],
-            capture=True,
-        )
-        self.cleanup_cmds.insert(
-            0, ["ip", "-4", "route", "del", "default", "dev", self.interface]
-        )
+        if util.is_illumos():
+            subp.subp(
+                ['route', 'add', '-inet', '-host', '-iface',
+                 self.router, self.ip], capture=True)
+            self.cleanup_cmdds.insert(
+                0, ['route' 'delete', '-inet', '-host', '-iface',
+                 self.router, self.ip])
+            subp.subp(
+                ['route', 'add', '-inet', 'default', self.router],
+                capture=True)
+            self.cleanup_cmdds.insert(
+                0, ['route' 'delete', '-inet', 'default', self.router])
+        else:
+            subp.subp(
+                [
+                    "ip",
+                    "-4",
+                    "route",
+                    "add",
+                    self.router,
+                    "dev",
+                    self.interface,
+                    "src",
+                    self.ip,
+                ],
+                capture=True,
+            )
+            self.cleanup_cmds.insert(
+                0,
+                [
+                    "ip",
+                    "-4",
+                    "route",
+                    "del",
+                    self.router,
+                    "dev",
+                    self.interface,
+                    "src",
+                    self.ip,
+                ],
+            )
+            subp.subp(
+                [
+                    "ip",
+                    "-4",
+                    "route",
+                    "add",
+                    "default",
+                    "via",
+                    self.router,
+                    "dev",
+                    self.interface,
+                ],
+                capture=True,
+            )
+            self.cleanup_cmds.insert(
+                0, ["ip", "-4", "route", "del", "default", "dev", self.interface]
+            )
 
 
 class RendererNotFoundError(RuntimeError):
     pass
 
 
-# vi: ts=4 expandtab
+# vi: ts=4 sw=4 expandtab

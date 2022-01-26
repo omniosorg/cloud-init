@@ -12,11 +12,13 @@ from . import (
     openbsd,
     renderer,
     sysconfig,
+    illumos,
 )
 
 NAME_TO_RENDERER = {
     "eni": eni,
     "freebsd": freebsd,
+    "illumos": illumos,
     "netbsd": netbsd,
     "netplan": netplan,
     "networkd": networkd,
@@ -32,6 +34,7 @@ DEFAULT_PRIORITY = [
     "netbsd",
     "openbsd",
     "networkd",
+    "illumos",
 ]
 
 
