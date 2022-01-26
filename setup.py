@@ -158,6 +158,7 @@ INITSYS_FILES = {
         for f in glob("systemd/*")
         if is_f(f) and is_generator(f)
     ],
+    "smf": [f for f in glob("smf/*") if is_f(f)],
 }
 INITSYS_ROOTS = {
     "sysvinit": "etc/rc.d/init.d",
@@ -170,6 +171,7 @@ INITSYS_ROOTS = {
     "systemd.generators": pkg_config_read(
         "systemd", "systemdsystemgeneratordir"
     ),
+    "smf": "lib/svc/manifest/system/",
 }
 INITSYS_TYPES = sorted([f.partition(".")[0] for f in INITSYS_ROOTS.keys()])
 
@@ -243,10 +245,13 @@ class InitsysInstallData(install):
         if self.init_system and isinstance(self.init_system, str):
             self.init_system = self.init_system.split(",")
 
-        if len(self.init_system) == 0 and not platform.system().endswith(
-            "BSD"
-        ):
-            self.init_system = ["systemd"]
+        if len(self.init_system) == 0:
+            if platform.system() == "SunOS":
+                self.init_system = ["smf"]
+            elif not platform.system().endswith(
+                "BSD"
+            ):
+                self.init_system = ["systemd"]
 
         bad = [f for f in self.init_system if f not in INITSYS_TYPES]
         if len(bad) != 0:
@@ -302,7 +307,7 @@ data_files = [
         [f for f in glob("doc/examples/seed/*") if is_f(f)],
     ),
 ]
-if not platform.system().endswith("BSD"):
+if not platform.system().endswith("BSD") and platform.system() != "SunOS":
     data_files.extend(
         [
             (
