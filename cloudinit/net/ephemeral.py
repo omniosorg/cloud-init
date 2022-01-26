@@ -14,6 +14,8 @@ from cloudinit.net.dhcp import (
     parse_static_routes,
 )
 
+from cloudinit.util import is_illumos
+
 LOG = logging.getLogger(__name__)
 
 
@@ -106,9 +108,18 @@ class EphemeralIPv4Network(object):
         """Teardown anything we set up."""
         for cmd in self.cleanup_cmds:
             subp.subp(cmd, capture=True)
+        if is_illumos():
+            net.illumos_delete_unused_intf(self.interfaces)
 
     def _delete_address(self, address, prefix):
         """Perform the ip command to remove the specified address."""
+        if is_illumos():
+            subp.subp(
+                ['/usr/sbin/ipadm', 'delete-addr',
+                 f'{self.interface}/eph'], capture=True)
+            net.illumos_delete_unused_intf(self.interface)
+            return
+
         subp.subp(
             [
                 "ip",
@@ -133,24 +144,33 @@ class EphemeralIPv4Network(object):
             self.broadcast,
         )
         try:
-            subp.subp(
-                [
-                    "ip",
-                    "-family",
-                    "inet",
-                    "addr",
-                    "add",
-                    cidr,
-                    "broadcast",
-                    self.broadcast,
-                    "dev",
-                    self.interface,
-                ],
-                capture=True,
-                update_env={"LANG": "C"},
-            )
+            if is_illumos():
+                subp.subp(['/usr/sbin/ipadm', 'create-if', self.interface],
+                    rcs=[0,1])
+                subp.subp(
+                    ['/usr/sbin/ipadm', 'create-addr', '-t', '-T', 'static',
+                     '-a', f'local={cidr}', f'{self.interface}/eph'],
+                    capture=True)
+            else:
+                subp.subp(
+                    [
+                        "ip",
+                        "-family",
+                        "inet",
+                        "addr",
+                        "add",
+                        cidr,
+                        "broadcast",
+                        self.broadcast,
+                        "dev",
+                        self.interface,
+                    ],
+                    capture=True,
+                    update_env={"LANG": "C"},
+                )
         except subp.ProcessExecutionError as e:
-            if "File exists" not in str(e.stderr):
+            if ("File exists" not in e.stderr and
+                "object already exists" not in e.stderr):
                 raise
             LOG.debug(
                 "Skip ephemeral network setup, %s already has address %s",
@@ -159,6 +179,10 @@ class EphemeralIPv4Network(object):
             )
         else:
             # Address creation success, bring up device and queue cleanup
+            if is_illumos():
+                self.cleanup_cmds.append(
+                    ['/usr/sbin/ipadm', 'delete-addr', f'{self.interface}/eph'])
+                return
             subp.subp(
                 [
                     "ip",
@@ -204,6 +228,13 @@ class EphemeralIPv4Network(object):
             via_arg = []
             if gateway != "0.0.0.0":
                 via_arg = ["via", gateway]
+            if is_illumos():
+                subp.subp(
+                    ['route', 'add', '-inet', net_address, gateway],
+                    capture=True)
+                self.cleanup_cmds.insert(
+                    0, ['route', 'delete', '-inet', net_address, gateway])
+                return
             subp.subp(
                 ["ip", "-4", "route", "append", net_address]
                 + via_arg
@@ -220,13 +251,30 @@ class EphemeralIPv4Network(object):
     def _bringup_router(self):
         """Perform the ip commands to fully setup the router if needed."""
         # Check if a default route exists and exit if it does
-        out, _ = subp.subp(["ip", "route", "show", "0.0.0.0/0"], capture=True)
+        if is_illumos():
+            out, _ = subp.subp(['netstat', '-rnc', '-f', 'inet'], capture=True)
+        else:
+            out, _ = subp.subp(["ip", "route", "show", "0.0.0.0/0"],
+                capture=True)
         if "default" in out:
             LOG.debug(
                 "Skip ephemeral route setup. %s already has default route: %s",
                 self.interface,
                 out.strip(),
             )
+            return
+        if is_illumos():
+            subp.subp(
+                ['route', 'add', '-inet', '-host', '-iface',
+                 self.router, self.ip], capture=True)
+            self.cleanup_cmdds.insert(
+                0, ['route' 'delete', '-inet', '-host', '-iface',
+                 self.router, self.ip])
+            subp.subp(
+                ['route', 'add', '-inet', 'default', self.router],
+                capture=True)
+            self.cleanup_cmdds.insert(
+                0, ['route' 'delete', '-inet', 'default', self.router])
             return
         subp.subp(
             [
@@ -341,6 +389,10 @@ class EphemeralDHCPv4(object):
 
     def clean_network(self):
         """Exit _ephipv4 context to teardown of ip configuration performed."""
+        if util.is_illumos():
+            subp.subp(['/usr/sbin/ipadm', 'delete-addr', '-r',
+                self.lease['if']])
+            illumos_delete_unused_intf(self.lease['nic'])
         if self.lease:
             self.lease = None
         if not self._ephipv4:
@@ -362,6 +414,8 @@ class EphemeralDHCPv4(object):
         if not leases:
             raise NoDHCPLeaseError()
         self.lease = leases[-1]
+        if util.is_illumos():
+            return
         LOG.debug(
             "Received dhcp lease on %s for %s/%s",
             self.lease["interface"],

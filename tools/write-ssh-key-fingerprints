@@ -7,7 +7,10 @@ do_syslog() {
 
     # rhels' version of logger_opts does not support long
     # form of -s (--stderr), so use short form.
-    logger_opts="-s"
+    # illumos' logger does not support -s at all
+    if [ $(uname -s) != 'SunOS' ]; then
+        logger_opts="-s"
+    fi
 
     # Need to end the options list with "--" to ensure that any minus symbols
     # in the text passed to logger are not interpreted as logger options.

@@ -87,7 +87,9 @@ cloud_init_modules:
  - bootcmd
  - write-files
 {% if variant not in ["netbsd", "openbsd"] %}
+{% if variant not in ["illumos"] %}
  - growpart
+{% endif %}
  - resizefs
 {% endif %}
 {% if not is_bsd %}
@@ -199,7 +201,7 @@ system_info:
    # This will affect which distro class gets used
 {% if variant in ["almalinux", "alpine", "amazon", "arch", "centos", "cloudlinux", "debian",
                   "eurolinux", "fedora", "freebsd", "gentoo", "netbsd", "miraclelinux", "openbsd", "openEuler",
-                  "openmandriva", "photon", "rhel", "rocky", "suse", "ubuntu", "virtuozzo"] %}
+                  "openmandriva", "photon", "rhel", "rocky", "suse", "ubuntu", "virtuozzo", "illumos", "omnios"] %}
    distro: {{ variant }}
 {% elif variant in ["dragonfly"] %}
    distro: dragonflybsd
@@ -356,6 +358,23 @@ system_info:
    # In Photon, we have default network settings, hence if network settings are
    # not explicitly given in metadata, don't use fallback network config.
    disable_fallback_netcfg: true
+{% elif variant in ["illumos", "omnios"] %}
+   default_user:
+     name: {{ variant }}
+     lock_passwd: True
+{% if variant == "omnios" %}
+     gecos: OmniOS user
+{% else %}
+     gecos: {{ variant }} cloud user
+{% endif %}
+     groups: [other]
+     sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+     profiles: Primary Administrator
+     shell: /bin/bash
+   paths:
+      run_dir: /var/run/cloud-init/
+      cloud_dir: /var/lib/cloud/
+      templates_dir: /etc/cloud/templates/
 {% endif %}
 {% if variant in ["freebsd", "netbsd", "openbsd"] %}
    network:

@@ -14,7 +14,7 @@ from io import StringIO
 import configobj
 
 from cloudinit import subp, temp_utils, util
-from cloudinit.net import find_fallback_nic, get_devicelist
+from cloudinit.net import find_fallback_nic, get_devicelist, illumos_delete_unused_intf
 
 LOG = logging.getLogger(__name__)
 
@@ -64,6 +64,13 @@ def maybe_perform_dhcp_discovery(nic=None, dhcp_log_func=None):
             "Skip dhcp_discovery: nic %s not found in get_devicelist.", nic
         )
         raise NoDHCPLeaseInterfaceError()
+    if util.is_illumos():
+        subp.subp(['/usr/sbin/ipadm', 'create-if', nic], rcs=[0,1])
+        subp.subp(['/usr/sbin/ipadm', 'create-addr', '-T', 'dhcp',
+                '-w', '15', f'{nic}/ephdhcp'])
+        subp.subp(['/usr/sbin/svcadm', 'restart', 'network/service'])
+        return [{'nic': nic, 'if': f'{nic}/ephdhcp'}]
+
     dhclient_path = subp.which("dhclient")
     if not dhclient_path:
         LOG.debug("Skip dhclient configuration: No dhclient command found.")
