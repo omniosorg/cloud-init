@@ -20,6 +20,7 @@ from cloudinit.net import (
     find_fallback_nic,
     get_devicelist,
     has_url_connectivity,
+    illumos_delete_unused_intf,
 )
 from cloudinit.net.network_state import mask_and_ipv4_to_bcast_addr as bcip
 
@@ -72,6 +73,10 @@ class EphemeralDHCPv4(object):
 
     def clean_network(self):
         """Exit _ephipv4 context to teardown of ip configuration performed."""
+        if util.is_illumos():
+            subp.subp(['/usr/sbin/ipadm', 'delete-addr', '-r',
+                self.lease['if']])
+            illumos_delete_unused_intf(self.lease['nic'])
         if self.lease:
             self.lease = None
         if not self._ephipv4:
@@ -98,6 +103,8 @@ class EphemeralDHCPv4(object):
         if not leases:
             raise NoDHCPLeaseError()
         self.lease = leases[-1]
+        if util.is_illumos():
+            return
         LOG.debug(
             "Received dhcp lease on %s for %s/%s",
             self.lease["interface"],
@@ -171,6 +178,13 @@ def maybe_perform_dhcp_discovery(nic=None, dhcp_log_func=None):
             "Skip dhcp_discovery: nic %s not found in get_devicelist.", nic
         )
         return []
+    if util.is_illumos():
+        subp.subp(['/usr/sbin/ipadm', 'create-if', nic], rcs=[0,1])
+        subp.subp(['/usr/sbin/ipadm', 'create-addr', '-T', 'dhcp',
+                '-w', '15', f'{nic}/ephdhcp'])
+        subp.subp(['/usr/sbin/svcadm', 'restart', 'network/service'])
+        return [{'nic': nic, 'if': f'{nic}/ephdhcp'}]
+
     dhclient_path = subp.which("dhclient")
     if not dhclient_path:
         LOG.debug("Skip dhclient configuration: No dhclient command found.")
