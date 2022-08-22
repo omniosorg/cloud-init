@@ -1,0 +1,14 @@
+ethernets:
+  bob3:
+    addresses:
+    - 10.0.0.5/25
+    gateway4: 10.0.0.127
+    match:
+      macaddress: 02:08:20:7c:68:7a
+    nameservers:
+      addresses:
+      - 1.1.1.1
+      - 9.9.9.9
+      search: omnios.org
+    set-name: bob3
+version: 2
