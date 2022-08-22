@@ -58,7 +58,7 @@ class Distro(distros.Distro):
             cmd = ['svcs', '-H', '-o', 'state', service]
             try:
                 (out, err) = subp.subp(cmd, capture=True)
-            except ProcessExecutionError:
+            except subp.ProcessExecutionError:
                 # Pass back to caller
                 raise
 
@@ -71,7 +71,7 @@ class Distro(distros.Distro):
             # Callers do not actually check the exit status unless
             # distro.uses_systemd() is True but exit code 3 would mean
             # 'not running', so we use that.
-            raise ProcessExecutionError(
+            raise subp.ProcessExecutionError(
                 cmd=cmd, stdout=out, stderr=err, exit_code=3
             )
 
@@ -285,5 +285,8 @@ class Distro(distros.Distro):
     def set_timezone(self, tz):
         self._update_init('TZ', tz)
 
+    def chpasswd(self, plist_in: list, hashed: bool):
+        for name, password in plist_in:
+            self.set_passwd(name, password, hashed=hashed)
 
 # vim:ts=4:sw=4:et:fdm=marker
