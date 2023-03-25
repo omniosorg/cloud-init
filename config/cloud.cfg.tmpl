@@ -91,7 +91,9 @@ cloud_init_modules:
  - bootcmd
  - write-files
 {% if variant not in ["netbsd", "openbsd"] %}
+{% if variant not in ["illumos"] %}
  - growpart
+{% endif %}
  - resizefs
 {% endif %}
 {% if not is_bsd %}
@@ -200,6 +202,7 @@ cloud_final_modules:
 system_info:
    # This will affect which distro class gets used
 {% if variant in ["alpine", "amazon", "arch", "debian", "fedora", "freebsd",
+                  "illumos", "omnios",
                   "gentoo", "netbsd", "mariner", "openbsd", "openEuler", "OpenCloudOS",
                   "openmandriva", "photon", "suse", "TencentOS", "ubuntu"] or is_rhel %}
    distro: {{ variant }}
@@ -374,6 +377,23 @@ system_info:
       renderers: ['networkd']
 
    ssh_svcname: sshd
+{% elif variant in ["illumos", "omnios"] %}
+   default_user:
+     name: {{ variant }}
+     lock_passwd: True
+{% if variant == "omnios" %}
+     gecos: OmniOS user
+{% else %}
+     gecos: {{ variant }} cloud user
+{% endif %}
+     groups: [other]
+     sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+     profiles: Primary Administrator
+     shell: /bin/bash
+   paths:
+      run_dir: /var/run/cloud-init/
+      cloud_dir: /var/lib/cloud/
+      templates_dir: /etc/cloud/templates/
 {% endif %}
 {% if variant in ["freebsd", "netbsd", "openbsd"] %}
    network:
