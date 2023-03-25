@@ -19,6 +19,7 @@ from socket import gaierror, getaddrinfo, inet_ntoa
 from struct import pack
 
 from cloudinit import sources, subp
+from cloudinit.net import dhcp, get_default_gateway
 from cloudinit import url_helper as uhelp
 from cloudinit import util
 from cloudinit.net import dhcp
@@ -192,19 +193,6 @@ def get_data_server():
         return None
     else:
         return addrinfo[0][4][0]  # return IP
-
-
-def get_default_gateway():
-    # Returns the default gateway ip address in the dotted format.
-    lines = util.load_file("/proc/net/route").splitlines()
-    for line in lines:
-        items = line.split("\t")
-        if items[1] == "00000000":
-            # Found the default route, get the gateway
-            gw = inet_ntoa(pack("<L", int(items[2], 16)))
-            LOG.debug("Found default route, gateway is %s", gw)
-            return gw
-    return None
 
 
 def get_vr_address():

@@ -1,0 +1,81 @@
+#!/bin/ksh
+#
+# {{{ CDDL HEADER
+#
+# This file and its contents are supplied under the terms of the
+# Common Development and Distribution License ("CDDL"), version 1.0.
+# You may only use this file in accordance with the terms of version
+# 1.0 of the CDDL.
+#
+# A full copy of the text of the CDDL should have accompanied this
+# source. A copy of the CDDL is also available via the Internet at
+# http://www.illumos.org/license/CDDL.
+# }}}
+
+# Copyright 2023 OmniOS Community Edition (OmniOSce) Association.
+
+ROOT="`git rev-parse --show-toplevel`"
+if [ -z "$ROOT" ]; then
+	echo "Cannot find root of checked out repository"
+	exit 1
+fi
+
+tmpd=`mktemp -d`
+tmpf=`mktemp`
+trap 'rm -rf $tmpd $tmpf $tmpf.*' EXIT
+
+echo "+ Installing 'pipreqs' to $tmpd"
+python3 -mvenv $tmpd
+. $tmpd/bin/activate
+pip install --quiet --upgrade pip
+pip install --quiet pipreqs
+
+function strip {
+    sed "
+        # Use core version
+        /setuptools/d
+        # Use core version (also needed by validate_pkg in gate)
+        /jsonschema/d
+        # Use versions from core
+        /attrs/d
+        /idna/d
+        /PyYAML/d
+        /six/d
+        /typing_extensions/d
+    "
+}
+
+function freeze {
+    typeset tag="$1"; shift
+    typeset f="$1"; shift
+    typeset op="$1"; shift
+
+    echo "+ $tag package set"
+    sed 's/^/    /' <  $f
+
+    rm -rf $tmpd
+    python3 -mvenv $tmpd
+    . $tmpd/bin/activate
+    echo "+ Building required package set ($tag)"
+    pip install --quiet --upgrade pip wheel
+    pip install -r $f
+
+    echo "+ Generating freeze file ($tag)"
+    pip freeze | strip | sed "
+1i\\
+#\\
+# This file was automatically produced by updatereqs\\
+# Generated on `date`\\
+# Do not edit directly\\
+#
+" > $op
+}
+
+echo "+ Evaluating requirements"
+pipreqs --print --mode no-pin $ROOT/cloudinit | strip > $tmpf.core
+
+freeze core $tmpf.core $ROOT/frozen-requirements.txt
+echo "+ Updated frozen-requirements.txt"
+
+# Vim hints
+# vim:ts=4:sw=4:et:fdm=marker

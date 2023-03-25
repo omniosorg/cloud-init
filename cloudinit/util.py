@@ -514,6 +514,16 @@ def is_OpenBSD():
     return system_info()["variant"] == "openbsd"
 
 
+@lru_cache()
+def is_OmniOS():
+    return system_info()['variant'] == "omnios"
+
+
+@lru_cache()
+def is_illumos():
+    return system_info()['variant'] in ('illumos', 'omnios')
+
+
 def get_cfg_option_bool(yobj, key, default=False):
     if key not in yobj:
         return default
@@ -678,6 +688,12 @@ def _get_variant(info):
             variant = "suse"
         else:
             variant = "linux"
+    elif system == "sunos":
+        out, _err = subp.subp(["uname", "-o"], rcs=[0, 1])
+        if out.strip() == "illumos":
+                variant = "illumos"
+                if "omnios" in info["dist"]:
+                    variant = "omnios"
     elif system in (
         "windows",
         "darwin",
@@ -1472,6 +1488,48 @@ def find_devs_with_dragonflybsd(
     return ["/dev/" + i for i in devlist]
 
 
+def find_devs_with_illumos(criteria=None, oformat='device',
+                           tag=None, no_cache=False, path=None):
+    wantlabel = None
+    wanttype = None
+    if criteria:
+        if criteria.startswith("LABEL="):
+            wantlabel = criteria.lstrip("LABEL=")
+        if criteria.startswith("TYPE="):
+            wanttype = criteria.lstrip("TYPE=")
+    ret = []
+    if not wantlabel and not wanttype:
+        return ret
+    for dev in glob.glob("/dev/dsk/c*t*d*p0"):
+        dtype = None
+        try:
+            (dtype, _err) = subp.subp(['fstyp', dev], rcs=[0])
+            dtype = dtype.strip()
+        except subp.ProcessExecutionError as e:
+            continue
+        if wanttype == 'iso9660' and dtype != 'hsfs':
+            continue
+        if wanttype == 'vfat' and dtype != 'pcfs':
+            continue
+        if wantlabel:
+            if dtype == 'pcfs':
+                # pcfs does not have `labelit` but this works just as well.
+                cmd = ['fstyp', '-v', dev]
+            else:
+                cmd = ['labelit', '-F', dtype, dev]
+            try:
+                (out, _err) = subp.subp(cmd, rcs=[0])
+            except subp.ProcessExecutionError as e:
+                continue
+
+            if not re.search(rf'^Volume (?:id|Label): {wantlabel}\s*$',
+                             out, re.MULTILINE):
+                continue
+        ret.append(dev)
+
+    return ret
+
+
 def find_devs_with(
     criteria=None, oformat="device", tag=None, no_cache=False, path=None
 ):
@@ -1490,6 +1548,10 @@ def find_devs_with(
         return find_devs_with_openbsd(criteria, oformat, tag, no_cache, path)
     elif is_DragonFlyBSD():
         return find_devs_with_dragonflybsd(
+            criteria, oformat, tag, no_cache, path
+        )
+    elif is_illumos():
+        return find_devs_with_illumos(
             criteria, oformat, tag, no_cache, path
         )
 
@@ -1899,6 +1961,9 @@ def mounts():
         if os.path.exists("/proc/mounts"):
             mount_locs = load_file("/proc/mounts").splitlines()
             method = "proc"
+        elif is_illumos() and os.path.exists("/etc/mnttab"):
+            mount_locs = load_file("/etc/mnttab").splitlines()
+            method = "mnttab"
         else:
             out = subp.subp("mount")
             mount_locs = out.stdout.splitlines()
@@ -1907,9 +1972,12 @@ def mounts():
         for mpline in mount_locs:
             # Linux: /dev/sda1 on /boot type ext4 (rw,relatime,data=ordered)
             # FreeBSD: /dev/vtbd0p2 on / (ufs, local, journaled soft-updates)
+            # illumos: /dev/dsk/c2t0d0p0 /mnt hsfs ro,... 1628960775
             try:
                 if method == "proc":
                     (dev, mp, fstype, opts, _freq, _passno) = mpline.split()
+                elif method == 'mnttab':
+                    (dev, mp, fstype, opts, _time) = mpline.split()
                 else:
                     m = re.search(mountre, mpline)
                     dev = m.group(1)
@@ -1974,6 +2042,14 @@ def mount_cb(
                 mtypes[index] = "cd9660"
             if mtype in ["vfat", "msdosfs"]:
                 mtypes[index] = "msdos"
+    elif is_illumos():
+        if mtypes is None:
+            mtypes = ['hsfs', 'pcfs']
+        for index, mtype in enumerate(mtypes):
+            if mtype == "iso9660":
+                mtypes[index] = "hsfs"
+            if mtype in ["vfat", "msdosfs"]:
+                mtypes[index] = "pcfs"
     else:
         # we cannot do a smart "auto", so just call 'mount' once with no -t
         mtypes = [""]
@@ -1981,6 +2057,8 @@ def mount_cb(
     mounted = mounts()
     with temp_utils.tempdir() as tmpd:
         umount = False
+        if is_illumos() and device in mounted:
+            mountpoint = mounted[os.path.realpath(device)]["mountpoint"]
         if os.path.realpath(device) in mounted:
             mountpoint = mounted[os.path.realpath(device)]["mountpoint"]
         else:
@@ -1990,7 +2068,10 @@ def mount_cb(
                 try:
                     mountcmd = ["mount", "-o", "ro"]
                     if mtype:
-                        mountcmd.extend(["-t", mtype])
+                        if is_illumos():
+                            mountcmd.extend(["-F", mtype])
+                        else:
+                            mountcmd.extend(["-t", mtype])
                     mountcmd.append(device)
                     mountcmd.append(tmpd)
                     subp.subp(mountcmd, update_env=update_env_for_mount)
@@ -2104,6 +2185,23 @@ def boottime():
         return buf.tv_sec + buf.tv_usec / 1000000.0
     raise RuntimeError("Unable to retrieve kern.boottime on this system")
 
+@lru_cache()
+def illumos_boottime():
+    """Use kstat to find the boot time
+
+    @return boottime: float to be compatible with linux
+    """
+    try:
+            (out, _err) = subp.subp(['kstat', '-j',
+                '-m', 'unix',
+                '-i', '0',
+                '-n', 'system_misc',
+            ], rcs=[0])
+            data = load_json(out, root_types=(list,))
+            return float(data[0]['data']['boot_time'])
+    except:
+            raise RuntimeError(
+                "Unable to retrieve boot_time on this system")
 
 def uptime():
     uptime_str = "??"
@@ -2114,6 +2212,9 @@ def uptime():
             contents = load_file("/proc/uptime")
             if contents:
                 uptime_str = contents.split()[0]
+        elif is_illumos():
+            method = 'kstat'
+            uptime_str = str(time.time() - illumos_boottime())
         else:
             method = "ctypes"
             # This is the *BSD codepath
@@ -2371,6 +2472,16 @@ def _is_container_freebsd():
     return out.strip() == "1"
 
 
+def _is_container_illumos():
+    if not is_illumos():
+        return False
+    cmd = ["zonename"]
+    if subp.which(cmd[0]) is None:
+        return False
+    (out, _) = subp.subp(cmd)
+    return out.strip() != "global"
+
+
 @lru_cache()
 def is_container():
     """
@@ -2379,6 +2490,7 @@ def is_container():
     checks = (
         _is_container_systemd,
         _is_container_freebsd,
+        _is_container_illumos,
         _is_container_old_lxc,
     )
 
@@ -2411,7 +2523,7 @@ def is_container():
                 (_key, val) = line.strip().split(":", 1)
                 if val != "0":
                     return True
-    except (IOError, OSError):
+    except (IOError, OSError, UnicodeDecodeError):
         pass
 
     return False
@@ -2576,9 +2688,9 @@ def parse_mount_info(path, mountinfo_lines, log=LOG, get_mnt_opts=False):
     return None
 
 
-def parse_mtab(path):
+def parse_mtab(path, tab='/etc/mtab'):
     """On older kernels there's no /proc/$$/mountinfo, so use mtab."""
-    for line in load_file("/etc/mtab").splitlines():
+    for line in load_file(tab).splitlines():
         devpth, mount_point, fs_type = line.split()[:3]
         if mount_point == path:
             return devpth, fs_type, mount_point
@@ -2770,6 +2882,8 @@ def get_mount_info(path, log=LOG, get_mnt_opts=False):
         return parse_mount_info(path, lines, log, get_mnt_opts)
     elif os.path.exists("/etc/mtab"):
         return parse_mtab(path)
+    elif os.path.exists("/etc/mnttab"):
+        return parse_mtab(path, '/etc/mnttab')
     else:
         return parse_mount(path, get_mnt_opts)
 
@@ -3113,7 +3227,6 @@ def get_proc_ppid_linux(pid):
     except IOError as e:
         LOG.warning("Failed to load /proc/%s/stat. %s", pid, e)
     return ppid
-
 
 def get_proc_ppid_ps(pid):
     """

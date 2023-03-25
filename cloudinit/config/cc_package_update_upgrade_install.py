@@ -76,8 +76,13 @@ def _multi_cfg_bool_get(cfg, *keys):
     return False
 
 
-def _fire_reboot(wait_attempts=6, initial_sleep=1, backoff=2):
-    subp.subp(REBOOT_CMD)
+def _fire_reboot(cloud, wait_attempts=6, initial_sleep=1, backoff=2):
+    try:
+        cmd = cloud.distro.shutdown_command(mode='reboot', delay='now',
+            message='Rebooting after package installation')
+    except:
+        cmd = REBOOT_CMD
+    subp.subp(cmd)
     start = time.time()
     wait_time = initial_sleep
     for _i in range(wait_attempts):
@@ -135,7 +140,7 @@ def handle(name: str, cfg: Config, cloud: Cloud, args: list) -> None:
             )
             # Flush the above warning + anything else out...
             flush_loggers(LOG)
-            _fire_reboot()
+            _fire_reboot(cloud)
         except Exception as e:
             util.logexc(LOG, "Requested reboot did not happen!")
             errors.append(e)

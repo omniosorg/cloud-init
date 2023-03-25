@@ -4,7 +4,9 @@
 {% set is_bsd = variant in ["dragonfly", "freebsd", "netbsd", "openbsd"] %}
 {% set is_rhel = variant in ["almalinux", "centos", "cloudlinux", "eurolinux",
                              "miraclelinux", "rhel", "rocky", "virtuozzo"] %}
+{% set is_illumos = variant in ["illumos", "omnios"] %}
 {% set gecos = ({"amazon": "EC2 Default User", "centos": "Cloud User",
+                 "omnios": "OmniOS user",
                  "debian": "Debian", "dragonfly": "DragonFly",
                  "freebsd": "FreeBSD", "mariner": "MarinerOS",
                  "rhel": "Cloud User", "netbsd": "NetBSD",
@@ -12,6 +14,7 @@
                  "photon": "PhotonOS", "ubuntu": "Ubuntu",
                  "unknown": "Ubuntu"}) %}
 {% set groups = ({"alpine": "adm, wheel", "arch": "wheel, users",
+                  "omnios": "other",
                   "debian": "adm, audio, cdrom, dialout, dip, floppy, netdev, plugdev, sudo, video",
                   "gentoo": "users, wheel", "mariner": "wheel",
                   "photon": "wheel",
@@ -23,6 +26,7 @@
                   "freebsd": "/bin/tcsh", "netbsd": "/bin/sh",
                   "openbsd": "/bin/ksh"}) %}
 {% set usernames = ({"amazon": "ec2-user", "centos": "cloud-user",
+                     "omnios": "omnios",
                      "openmandriva": "omv", "rhel": "cloud-user",
                      "unknown": "ubuntu"}) %}
 {% if is_bsd %}
@@ -118,7 +122,9 @@ cloud_init_modules:
   - bootcmd
   - write_files
 {% if variant not in ["netbsd", "openbsd"] %}
+{% if not is_illumos %}
   - growpart
+{% endif %}
   - resizefs
 {% endif %}
 {% if not is_bsd %}
@@ -224,7 +230,7 @@ system_info:
 {% if variant in ["alpine", "amazon", "arch", "debian", "fedora", "freebsd",
                   "gentoo", "mariner", "netbsd", "openbsd", "OpenCloudOS",
                   "openeuler", "openmandriva", "photon", "suse", "TencentOS",
-                  "ubuntu"] or is_rhel %}
+                  "ubuntu"] or is_rhel or is_illumos %}
   distro: {{ variant }}
 {% elif variant == "dragonfly" %}
   distro: dragonflybsd
@@ -242,7 +248,7 @@ system_info:
 {% if variant in ["alpine", "amazon", "arch", "debian", "fedora", "gentoo",
                   "mariner", "OpenCloudOS", "openeuler", "openmandriva",
                   "photon", "suse", "TencentOS", "ubuntu", "unknown"]
-                 or is_bsd or is_rhel %}
+                 or is_bsd or is_rhel or is_illumos %}
     lock_passwd: True
 {% endif %}
 {% if variant in gecos %}
@@ -271,6 +277,9 @@ system_info:
     doas:
       - permit nopass {{ variant }}
 {% endif %}
+{% endif %}
+{% if is_illumos %}
+    profiles: Primary Administrator
 {% endif %}
     sudo: ["ALL=(ALL) NOPASSWD:ALL"]
 {% if variant in shells %}
@@ -326,6 +335,12 @@ system_info:
   # Other config here will be given to the distro class and/or path classes
   paths:
     cloud_dir: /var/lib/cloud/
+    templates_dir: /etc/cloud/templates/
+{% endif %}
+{% if is_illumos %}
+  paths:
+    run_dir: /var/run/cloud-init/
+    cloud_dir: /var/run/cloud-init/
     templates_dir: /etc/cloud/templates/
 {% endif %}
 {% if variant == "debian" %}

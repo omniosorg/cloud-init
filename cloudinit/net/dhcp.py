@@ -25,6 +25,7 @@ from cloudinit.net import (
     get_interface_mac,
     is_ib_interface,
 )
+from cloudinit.settings import RUN_CLOUD_CONFIG
 
 LOG = logging.getLogger(__name__)
 
@@ -195,6 +196,18 @@ class DhcpClient(abc.ABC):
     def stop_service(cls, dhcp_interface: str, distro):
         distro.manage_service("stop", cls.client_name, rcs=[0, 1])
 
+class illumosDhcp(DhcpClient):
+    client_name = "illumosdhcp"
+
+    def dhcp_discovery(
+        self,
+        interface,
+        dhcp_log_func=None,
+        distro=None,
+    ):
+        LOG.debug("Performing a dhcp discovery on %s", interface)
+        return distro.obtain_dhcp_lease(interface)
+
 
 class IscDhclient(DhcpClient):
     client_name = "dhclient"
@@ -262,8 +275,8 @@ class IscDhclient(DhcpClient):
         # We want to avoid running /sbin/dhclient-script because of
         # side-effects in # /etc/resolv.conf any any other vendor specific
         # scripts in /etc/dhcp/dhclient*hooks.d.
-        pid_file = "/run/dhclient.pid"
-        lease_file = "/run/dhclient.lease"
+        pid_file = os.path.join(RUN_CLOUD_CONFIG, "dhclient.pid")
+        lease_file = os.path.join(RUN_CLOUD_CONFIG, "dhclient.lease")
         config_file = None
 
         # this function waits for these files to exist, clean previous runs

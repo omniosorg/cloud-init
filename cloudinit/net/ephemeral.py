@@ -15,6 +15,8 @@ from cloudinit.net.dhcp import (
 )
 from cloudinit.subp import ProcessExecutionError
 
+from cloudinit.util import is_illumos
+
 LOG = logging.getLogger(__name__)
 
 

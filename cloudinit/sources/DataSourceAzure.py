@@ -273,6 +273,10 @@ def get_resource_disk_on_freebsd(port_id) -> Optional[str]:
     return None
 
 
+def get_resource_disk_on_illumos(port_id):
+    return None
+
+
 # update the FreeBSD specific information
 if util.is_FreeBSD():
     DEFAULT_FS = "freebsd-ufs"
@@ -284,6 +288,21 @@ if util.is_FreeBSD():
         LOG.debug("resource disk is None")
     # TODO Find where platform entropy data is surfaced
     PLATFORM_ENTROPY_SOURCE = None
+
+# update the illumos specific information
+if util.is_illumos():
+    DEFAULT_PRIMARY_NIC = 'hv_netvsc0'
+    LEASE_FILE = '/etc/dhcp/hv_netvsc0:1.dhc'
+    DEFAULT_FS = 'zfs'
+    res_disk = get_resource_disk_on_illumos(1)
+    if res_disk is not None:
+        LOG.debug("resource disk is not None")
+        RESOURCE_DISK_PATH = "/dev/" + res_disk
+    else:
+        LOG.debug("resource disk is None")
+    # TODO Find where platform entropy data is surfaced
+    PLATFORM_ENTROPY_SOURCE = None
+
 
 BUILTIN_DS_CONFIG = {
     "data_dir": AGENT_SEED_DIR,

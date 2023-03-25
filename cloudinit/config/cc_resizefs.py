@@ -11,6 +11,7 @@
 import errno
 import logging
 import os
+import re
 import stat
 from textwrap import dedent
 
@@ -20,6 +21,7 @@ from cloudinit.config import Config
 from cloudinit.config.schema import MetaSchema, get_meta_doc
 from cloudinit.distros import ALL_DISTROS
 from cloudinit.settings import PER_ALWAYS
+from cloudinit import temp_utils
 
 NOBLOCK = "noblock"
 
@@ -130,6 +132,15 @@ def _can_skip_resize_ufs(mount_point, devpth):
     return False
 
 
+def _can_skip_resize_zfs(zpool, devpth):
+    try:
+        (out, _err) = subp.subp(['zpool', 'get', '-Hp', '-o', 'value',
+            'expandsz', zpool])
+        return out.strip() == '-'
+    except subp.ProcessExecutionError as e:
+        return False
+
+
 # Do not use a dictionary as these commands should be able to be used
 # for multiple filesystem types if possible, e.g. one command for
 # ext2, ext3 and ext4.
@@ -143,7 +154,10 @@ RESIZE_FS_PREFIXES_CMDS = [
     ("bcachefs", _resize_bcachefs),
 ]
 
-RESIZE_FS_PRECHECK_CMDS = {"ufs": _can_skip_resize_ufs}
+RESIZE_FS_PRECHECK_CMDS = {
+    "ufs": _can_skip_resize_ufs,
+    "zfs": _can_skip_resize_zfs,
+}
 
 
 def can_skip_resize(fs_type, resize_what, devpth):
@@ -267,7 +281,12 @@ def handle(name: str, cfg: Config, cloud: Cloud, args: list) -> None:
     info = "dev=%s mnt_point=%s path=%s" % (devpth, mount_point, resize_what)
     LOG.debug("resize_info: %s", info)
 
-    devpth = maybe_get_writable_device_path(devpth, info)
+    if util.is_illumos() and fs_type == 'zfs':
+        # On illumos ZFS, the devices are just bare words like 'c0t0d0'
+        # which can be used directly as arguments for the resize.
+        pass
+    else:
+        devpth = maybe_get_writable_device_path(devpth, info)
     if not devpth:
         return  # devpath was not a writable block device
 
