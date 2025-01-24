@@ -13,11 +13,13 @@ from cloudinit.net import (
     openbsd,
     renderer,
     sysconfig,
+    illumos,
 )
 
 NAME_TO_RENDERER = {
     "eni": eni,
     "freebsd": freebsd,
+    "illumos": illumos,
     "netbsd": netbsd,
     "netplan": netplan,
     "network-manager": network_manager,
@@ -35,6 +37,7 @@ DEFAULT_PRIORITY = [
     "netbsd",
     "openbsd",
     "networkd",
+    "illumos",
 ]
 
 

@@ -315,6 +315,26 @@ class NetworkdActivator(NetworkActivator):
         )
 
 
+class illumosActivator(NetworkActivator):
+    @staticmethod
+    def available(target=None) -> bool:
+        return util.is_illumos()
+
+    @staticmethod
+    def bring_up_interface(device_name: str) -> bool:
+        subp.subp(['/usr/sbin/ipadm', 'enable-if', '-t', device_name],
+            rcs=[0, 1])
+        return True
+
+    @staticmethod
+    def bring_down_interface(device_name: str) -> bool:
+        try:
+            subp.subp(['/usr/sbin/ipadm', 'disable-if', '-t', device_name])
+            return True
+        except:
+            return False
+
+
 # This section is mostly copied and pasted from renderers.py. An abstract
 # version to encompass both seems overkill at this point
 DEFAULT_PRIORITY = [
@@ -322,7 +342,7 @@ DEFAULT_PRIORITY = [
     "netplan",
     "network-manager",
     "networkd",
-    "ifconfig",
+    "illumos",
 ]
 
 NAME_TO_ACTIVATOR: Dict[str, Type[NetworkActivator]] = {
@@ -330,7 +350,7 @@ NAME_TO_ACTIVATOR: Dict[str, Type[NetworkActivator]] = {
     "netplan": NetplanActivator,
     "network-manager": NetworkManagerActivator,
     "networkd": NetworkdActivator,
-    "ifconfig": IfConfigActivator,
+    "illumos": illumosActivator,
 }
 
 

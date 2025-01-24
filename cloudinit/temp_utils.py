@@ -3,6 +3,7 @@
 import contextlib
 import errno
 import logging
+import platform
 import os
 import shutil
 import tempfile
@@ -10,7 +11,10 @@ import tempfile
 from cloudinit import util
 
 LOG = logging.getLogger(__name__)
-_ROOT_TMPDIR = "/run/cloud-init/tmp"
+if platform.system() == "SunOS":
+    _ROOT_TMPDIR = "/var/run/cloud-init/tmp"
+else:
+    _ROOT_TMPDIR = "/run/cloud-init/tmp"
 _EXE_ROOT_TMPDIR = "/var/tmp/cloud-init"
 
 

@@ -51,7 +51,12 @@ def _fire_reboot(
     # systemd will kill cloud-init with a signal
     # this is expected so don't behave as if this is a failure state
     with signal_handler.suspend_crash():
-        subp.subp(REBOOT_CMD)
+        try:
+            cmd = cloud.distro.shutdown_command(mode='reboot', delay='now',
+                message='Rebooting after package installation')
+        except:
+            cmd = REBOOT_CMD
+        subp.subp(cmd)
     start = time.monotonic()
     wait_time = initial_sleep
     for _i in range(wait_attempts):
@@ -115,7 +120,7 @@ def handle(name: str, cfg: Config, cloud: Cloud, args: list) -> None:
             )
             # Flush the above warning + anything else out...
             flush_loggers(LOG)
-            _fire_reboot()
+            _fire_reboot(cloud)
         except Exception as e:
             util.logexc(LOG, "Requested reboot did not happen!")
             errors.append(e)

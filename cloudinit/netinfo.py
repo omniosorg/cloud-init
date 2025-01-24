@@ -549,9 +549,71 @@ def _netdev_route_info_netstat(route_data):
     return routes
 
 
+def _netdev_route_info_illumos():
+    routes = {}
+    routes['ipv4'] = []
+    routes['ipv6'] = []
+
+    try:
+        (route_data, _err) = subp.subp( ["netstat", "-rnv", "-f", "inet"])
+    except subp.ProcessExecutionError:
+        pass
+    else:
+        entries = route_data.splitlines()
+        for line in entries:
+            if not line:
+                continue
+            toks = line.split()
+            if len(toks) < 9:
+                continue
+
+            if toks[0].startswith(('IRE', 'Destination', '---')):
+                continue
+
+            routes['ipv4'].append({
+                'destination': toks[0],
+                'genmask': toks[1],
+                'gateway': toks[2],
+                'iface': toks[3],
+                'ref': toks[5],
+                'flags': toks[6],
+                'metric': '1',
+                'use': '1',
+            })
+
+    try:
+        (route_data, _err) = subp.subp( ["netstat", "-rnv", "-f", "inet6"])
+    except subp.ProcessExecutionError:
+        pass
+    else:
+        entries = route_data.splitlines()
+        for line in entries:
+            if not line:
+                continue
+            toks = line.split()
+            if len(toks) < 8:
+                continue
+
+            if toks[0].startswith(('IRE', 'Destination', '---')):
+                continue
+            routes['ipv6'].append({
+                'destination': toks[0],
+                'gateway': toks[1],
+                'iface': toks[2],
+                'ref': toks[4],
+                'flags': toks[5],
+                'metric': '1',
+                'use': '1',
+            })
+
+    return routes
+
+
 def route_info():
     routes = {}
-    if subp.which("ip"):
+    if util.is_illumos():
+        routes = _netdev_route_info_illumos()
+    elif subp.which("ip"):
         # Try iproute first of all
         (iproute_out, _err) = subp.subp(["ip", "-o", "route", "list"])
         routes = _netdev_route_info_iproute(iproute_out)

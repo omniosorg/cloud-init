@@ -1,0 +1,20 @@
+#cloud-config
+chpasswd:
+  expire: false
+disable_root: false
+hostname: test
+password: $6$SEeDRaFR$CI8Y/wfMXioIWlrtTLs75iOA4m/./1Vu78d5Plhk6N/T.yctR/s8ojMIjIhyIJB8lwYJAlQXi5GBuh4O0gjY5/
+ssh-pwauth: true
+ssh_authorized_keys:
+- ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKi3Xy6qla2g7wH5b1t+6nDi99D/Unl9Hqpi7j4acP8s
+  cinit
+users:
+- default
+- name: root
+  ssh_authorized_keys:
+  - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKi3Xy6qla2g7wH5b1t+6nDi99D/Unl9Hqpi7j4acP8s
+    cinit
+packages:
+  - system/cpuid
+  - [system/pciutils, 3.7.0]
+package_reboot_if_required: false
