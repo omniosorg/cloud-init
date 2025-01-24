@@ -1,0 +1,18 @@
+#cloud-config
+hostname: citest
+chpasswd:
+  expire: false
+ssh_pwauth: true
+password: $6$dE3Q2Ma0ipHbPTUi$tYZRexg6.wBOYPiX8EuHcx6IgR0GE9WTfyKjltE9Ymyh7wiPzm7f9BGLmH4lz6EB.94TfCTyFR1.Yi2BfddtD1
+users:
+  - default
+ssh_authorized_keys:
+  - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGBtVIRyTuAnV7tf/8GfFap86q3+ci4/wVYh38nvtwBu af@buckk.fiddaman.net
+manage_etc_hosts: true
+timezone: UTC
+locale: en_US.UTF-8
+packages:
+  - system/cpuid
+package_reboot_if_required: false
+runcmd:
+  - echo "cloud-init http seed test ran at $(date)" > /var/tmp/ci-http-test

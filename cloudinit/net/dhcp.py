@@ -297,6 +297,31 @@ class DhcpClient(abc.ABC):
         return {}
 
 
+class illumosDhcp(DhcpClient):
+    client_name = "illumosdhcp"
+
+    def __init__(self):
+        # DHCP on illumos is performed with ipadm(8), which hands the work
+        # to the dhcpagent(8) daemon; there is no client binary to locate.
+        self.dhcp_client_path = None
+
+    @staticmethod
+    def parse_static_routes(routes: str) -> List[Tuple[str, str]]:
+        return []
+
+    def get_newest_lease(self, interface: str) -> Dict[str, Any]:
+        return {}
+
+    def dhcp_discovery(
+        self,
+        interface,
+        dhcp_log_func=None,
+        distro=None,
+    ):
+        LOG.debug("Performing a dhcp discovery on %s", interface)
+        return distro.obtain_dhcp_lease(interface)
+
+
 class IscDhclient(DhcpClient):
     client_name = "dhclient"
 

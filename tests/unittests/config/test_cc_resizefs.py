@@ -172,11 +172,15 @@ class TestResizefs:
         )
 
     @mock.patch("cloudinit.util.is_container", return_value=False)
+    @mock.patch(
+        "cloudinit.config.cc_resizefs.can_skip_resize",
+        return_value=False,
+    )
     @mock.patch("cloudinit.util.parse_mount")
     @mock.patch("cloudinit.config.cc_resizefs.get_device_info_from_zpool")
     @mock.patch("cloudinit.util.get_mount_info")
     def test_handle_zfs_root(
-        self, mount_info, zpool_info, parse_mount, is_container
+        self, mount_info, zpool_info, parse_mount, m_skip_zfs, is_container
     ):
         devpth = "vmzroot/ROOT/freebsd"
         disk = "gpt/system"
@@ -196,11 +200,15 @@ class TestResizefs:
         assert (("zpool", "online", "-e", "vmzroot", disk),) == ret
 
     @mock.patch("cloudinit.util.is_container", return_value=False)
+    @mock.patch(
+        "cloudinit.config.cc_resizefs.can_skip_resize",
+        return_value=False,
+    )
     @mock.patch("cloudinit.util.get_mount_info")
     @mock.patch("cloudinit.config.cc_resizefs.get_device_info_from_zpool")
     @mock.patch("cloudinit.util.parse_mount")
     def test_handle_modern_zfsroot(
-        self, mount_info, zpool_info, parse_mount, is_container
+        self, mount_info, zpool_info, parse_mount, m_skip_zfs, is_container
     ):
         devpth = "zroot/ROOT/default"
         disk = "da0p3"
