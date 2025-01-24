@@ -22,6 +22,7 @@ import configobj
 
 from cloudinit import subp, temp_utils, util
 from cloudinit.net import get_interface_mac, is_ib_interface
+from cloudinit.settings import DEFAULT_RUN_DIR
 
 LOG = logging.getLogger(__name__)
 
@@ -219,6 +220,17 @@ class DhcpClient(abc.ABC):
         """
         return {}
 
+class illumosDhcp(DhcpClient):
+    client_name = "illumosdhcp"
+
+    def dhcp_discovery(
+        self,
+        interface,
+        dhcp_log_func=None,
+        distro=None,
+    ):
+        LOG.debug("Performing a dhcp discovery on %s", interface)
+        return distro.obtain_dhcp_lease(interface)
 
 class IscDhclient(DhcpClient):
     client_name = "dhclient"
@@ -312,7 +324,7 @@ class IscDhclient(DhcpClient):
         # We want to avoid running /sbin/dhclient-script because of
         # side-effects in # /etc/resolv.conf any any other vendor specific
         # scripts in /etc/dhcp/dhclient*hooks.d.
-        pid_file = "/run/dhclient.pid"
+        pid_file = os.path.join(DEFAULT_RUN_DIR, "dhclient.pid")
         config_file = None
         sleep_time = 0.01
         sleep_cycles = int(self.timeout / sleep_time)

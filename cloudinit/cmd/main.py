@@ -543,6 +543,15 @@ def main_init(name, args):
     _maybe_persist_instance_data(init)
     # Stage 6
     iid = init.instancify()
+    if init.is_new_instance():
+        log_util.multi_log("""
+
+*********************************************************
+* cloud-init is configuring this system, please wait... *
+*********************************************************
+
+""", console=True, stderr=True, log=LOG)
+
     LOG.debug(
         "[%s] %s will now be targeting instance id: %s. new=%s",
         mode,

@@ -12,6 +12,7 @@ import logging
 import os
 import re
 from typing import Callable, Dict, List, Optional, Tuple
+from socket import inet_ntoa
 
 from cloudinit import subp, util
 from cloudinit.net.netops.iproute2 import Iproute2
@@ -51,6 +52,10 @@ def natural_sort_key(s, _nsre=re.compile("([0-9]+)")):
         int(text) if text.isdigit() else text.lower()
         for text in re.split(_nsre, s)
     ]
+
+
+def zeropad_mac(mac):
+    return ':'.join(l.zfill(2) for l in mac.split(':'))
 
 
 def get_sys_class_path():
@@ -123,7 +128,32 @@ def read_sys_net_int(iface, field):
         return None
 
 
+def illumos_linkprop(devname, prop):
+    (out, _err) = subp.subp(['/usr/sbin/dladm', 'show-link', '-p',
+        '-o', prop, devname])
+    return out.strip()
+
+
+def illumos_intf_in_use(devname):
+    (out, _err) = subp.subp(['/usr/sbin/ipadm', 'show-addr', '-p',
+        '-o', 'addrobj'])
+    for addr in out.splitlines():
+        if addr.startswith(f'{devname}/'):
+            return True
+    return False
+
+
+def illumos_delete_unused_intf(devname):
+    if not illumos_intf_in_use(devname):
+        subp.subp(['/usr/sbin/ipadm', 'delete-if', devname])
+
+
 def is_up(devname):
+    if util.is_illumos():
+        # This function is used to check if the network is already up and
+        # therefore to avoid using ephemeral configuration. On illumos,
+        # check if there are any configured addresses.
+        return illumos_intf_in_use(devname)
     # The linux kernel says to consider devices in 'unknown'
     # operstate as up for the purposes of network configuration. See
     # Documentation/networking/operstates.txt in the kernel source.
@@ -132,15 +162,21 @@ def is_up(devname):
 
 
 def is_bridge(devname):
+    if util.is_illumos():
+        return illumos_linkprop(devname, 'CLASS') == "bridge"
     return os.path.exists(sys_dev_path(devname, "bridge"))
 
 
 def is_bond(devname):
+    if util.is_illumos():
+        return illumos_linkprop(devname, 'CLASS') == "aggr"
     return os.path.exists(sys_dev_path(devname, "bonding"))
 
 
 def get_master(devname):
     """Return the master path for devname, or None if no master"""
+    if util.is_illumos():
+        return None
     path = sys_dev_path(devname, path="master")
     if os.path.exists(path):
         return path
@@ -356,6 +392,13 @@ def is_vlan(devname):
 
 def device_driver(devname):
     """Return the device driver for net device named 'devname'."""
+    if util.is_illumos():
+        try:
+            (out, _err) = subp.subp(['/usr/sbin/dladm', 'show-phys',
+                '-mp', '-o', 'CLIENT', devname])
+            return out.strip().rstrip('1234567890')
+        except subp.ProcessExecutionError as e:
+            return None
     driver = None
     driver_path = sys_dev_path(devname, "device/driver")
     # driver is a symlink to the driver *dir*
@@ -375,7 +418,7 @@ def device_devid(devname):
 
 
 def get_devicelist():
-    if util.is_FreeBSD() or util.is_DragonFlyBSD():
+    if util.is_FreeBSD() or util.is_DragonFlyBSD() or util.is_illumos():
         return list(get_interfaces_by_mac().values())
 
     try:
@@ -398,6 +441,31 @@ def is_disabled_cfg(cfg):
     return cfg.get("config") == "disabled"
 
 
+def get_default_gateway():
+    """Returns the default gateway ip address in the dotted format."""
+    if util.is_illumos():
+        return get_default_gateway_on_illumos()
+    lines = util.load_text_file("/proc/net/route").splitlines()
+    for line in lines:
+        items = line.split("\t")
+        if items[1] == "00000000":
+            # Found the default route, get the gateway
+            gw = inet_ntoa(pack("<L", int(items[2], 16)))
+            LOG.debug("Found default route, gateway is %s", gw)
+            return gw
+    return None
+
+
+def get_default_gateway_on_illumos():
+    try:
+        (out, _) = subp.subp(['route', '-n', 'get', 'default'])
+        m = re.search(rf'^\s+gateway:\s+([0-9.]+)', out, re.MULTILINE)
+        if m:
+            return m.group(1)
+    except:
+        pass
+    return None
+
 def find_candidate_nics() -> List[str]:
     """Get the list of network interfaces viable for networking.
 
@@ -405,7 +473,7 @@ def find_candidate_nics() -> List[str]:
     """
     if util.is_FreeBSD() or util.is_DragonFlyBSD():
         return find_candidate_nics_on_freebsd()
-    elif util.is_NetBSD() or util.is_OpenBSD():
+    elif util.is_NetBSD() or util.is_OpenBSD() or util.is_illumos():
         return find_candidate_nics_on_netbsd_or_openbsd()
     else:
         return find_candidate_nics_on_linux()
@@ -415,7 +483,7 @@ def find_fallback_nic() -> Optional[str]:
     """Get the name of the 'fallback' network device."""
     if util.is_FreeBSD() or util.is_DragonFlyBSD():
         return find_fallback_nic_on_freebsd()
-    elif util.is_NetBSD() or util.is_OpenBSD():
+    elif util.is_NetBSD() or util.is_OpenBSD() or util.is_illumos():
         return find_fallback_nic_on_netbsd_or_openbsd()
     else:
         return find_fallback_nic_on_linux()
@@ -675,7 +743,7 @@ def _get_current_rename_info(check_downable=True):
             "up": is_up(name),
         }
 
-    if check_downable:
+    if check_downable and not util.is_illumos():
         nmatch = re.compile(r"[0-9]+:\s+(\w+)[@:]")
         ipv6, _err = subp.subp(
             ["ip", "-6", "addr", "show", "permanent", "scope", "global"],
@@ -785,6 +853,12 @@ def _rename_interfaces(
                 )
             continue
 
+        if util.is_illumos():
+            if not illumos_intf_in_use(curname):
+                subp.subp(["/usr/sbin/dladm", "rename-link", curname, newname],
+                    capture=True)
+            continue
+
         if cur["up"]:
             msg = "[busy] Error renaming mac=%s from %s to %s"
             if not cur["downable"]:
@@ -855,6 +929,12 @@ def _rename_interfaces(
 
 def get_interface_mac(ifname):
     """Returns the string value of an interface's MAC Address"""
+    if util.is_illumos():
+        (out, _) = subp.subp(['/usr/sbin/dladm', 'show-phys', '-m',
+        '-o', 'ADDRESS', ifname])
+        for line in out.splitlines():
+            if ':' in line:
+                return zeropad_mac(line)
     path = "address"
     if os.path.isdir(sys_dev_path(ifname, "bonding_slave")):
         # for a bond slave, get the nic's hwaddress, not the address it
@@ -884,6 +964,8 @@ def get_interfaces_by_mac() -> dict:
         return get_interfaces_by_mac_on_netbsd()
     elif util.is_OpenBSD():
         return get_interfaces_by_mac_on_openbsd()
+    elif util.is_illumos():
+        return get_interfaces_by_mac_on_illumos()
     else:
         return get_interfaces_by_mac_on_linux()
 
@@ -952,6 +1034,18 @@ def get_interfaces_by_mac_on_openbsd() -> dict:
         if m:
             fields = m.groupdict()
             ret[fields["mac"]] = fields["ifname"]
+    return ret
+
+
+def get_interfaces_by_mac_on_illumos() -> dict():
+    ret = {}
+    (out, _) = subp.subp(['/usr/sbin/dladm', 'show-phys', '-m',
+        '-o', 'LINK,ADDRESS'])
+    for line in out.splitlines():
+        (link, mac) = line.split()
+        if ':' not in mac:
+            continue
+        ret[zeropad_mac(mac)] = link
     return ret
 
 

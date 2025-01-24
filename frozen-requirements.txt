@@ -1,0 +1,18 @@
+#
+# This file was automatically produced by updatereqs
+# Generated on Fri Jan 24 14:10:16 UTC 2025
+# Do not edit directly
+#
+certifi==2024.12.14
+charset-normalizer==3.4.1
+configobj==5.0.9
+Jinja2==3.1.5
+jsonpatch==1.33
+jsonpointer==3.0.0
+MarkupSafe==3.0.2
+oauthlib==3.2.2
+passlib==1.7.4
+pyserial==3.5
+requests==2.32.3
+urllib3==2.3.0
+wheel==0.45.1

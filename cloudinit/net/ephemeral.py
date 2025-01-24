@@ -13,6 +13,8 @@ from cloudinit.net.dhcp import NoDHCPLeaseError, maybe_perform_dhcp_discovery
 from cloudinit.subp import ProcessExecutionError
 from cloudinit.url_helper import UrlError, wait_for_url
 
+from cloudinit.util import is_illumos
+
 LOG = logging.getLogger(__name__)
 
 

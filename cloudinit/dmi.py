@@ -11,6 +11,7 @@ from cloudinit.util import (
     is_DragonFlyBSD,
     is_FreeBSD,
     is_OpenBSD,
+    is_illumos,
 )
 
 LOG = logging.getLogger(__name__)
@@ -18,8 +19,8 @@ LOG = logging.getLogger(__name__)
 # Path for DMI Data
 DMI_SYS_PATH = "/sys/class/dmi/id"
 
-KernelNames = namedtuple("KernelNames", ["linux", "freebsd", "openbsd"])
-KernelNames.__new__.__defaults__ = (None, None, None)
+KernelNames = namedtuple("KernelNames", ["linux", "freebsd", "openbsd", "illumos"])
+KernelNames.__new__.__defaults__ = (None, None, None, None)
 
 # FreeBSD's kenv(1) and Linux /sys/class/dmi/id/* both use different names from
 # dmidecode. The values are the same, and ultimately what we're interested in.
@@ -30,49 +31,49 @@ KernelNames.__new__.__defaults__ = (None, None, None)
 # platforms to find dmidecode's values, their keys need to be put in here.
 DMIDECODE_TO_KERNEL = {
     "baseboard-asset-tag": KernelNames(
-        "board_asset_tag", "smbios.planar.tag", None
+        "board_asset_tag", "smbios.planar.tag", None, None
     ),
     "baseboard-manufacturer": KernelNames(
-        "board_vendor", "smbios.planar.maker", None
+        "board_vendor", "smbios.planar.maker", None, (2, "Manufacturer")
     ),
     "baseboard-product-name": KernelNames(
-        "board_name", "smbios.planar.product", None
+        "board_name", "smbios.planar.product", None, (2, "Product")
     ),
     "baseboard-serial-number": KernelNames(
-        "board_serial", "smbios.planar.serial", None
+        "board_serial", "smbios.planar.serial", None, (2, "Serial Number")
     ),
     "baseboard-version": KernelNames(
-        "board_version", "smbios.planar.version", None
+        "board_version", "smbios.planar.version", None, (2, "Version")
     ),
-    "bios-release-date": KernelNames("bios_date", "smbios.bios.reldate", None),
-    "bios-vendor": KernelNames("bios_vendor", "smbios.bios.vendor", None),
-    "bios-version": KernelNames("bios_version", "smbios.bios.version", None),
+    "bios-release-date": KernelNames("bios_date", "smbios.bios.reldate", None, (0, "Release Date")),
+    "bios-vendor": KernelNames("bios_vendor", "smbios.bios.vendor", None, (0, "Vendor")),
+    "bios-version": KernelNames("bios_version", "smbios.bios.version", None, (0, "Version String")),
     "chassis-asset-tag": KernelNames(
-        "chassis_asset_tag", "smbios.chassis.tag", None
+        "chassis_asset_tag", "smbios.chassis.tag", None, (3, "Asset Tag")
     ),
     "chassis-manufacturer": KernelNames(
-        "chassis_vendor", "smbios.chassis.maker", "hw.vendor"
+        "chassis_vendor", "smbios.chassis.maker", "hw.vendor", (3, "Manufacturer")
     ),
     "chassis-serial-number": KernelNames(
-        "chassis_serial", "smbios.chassis.serial", "hw.uuid"
+        "chassis_serial", "smbios.chassis.serial", "hw.uuid", (3, "Serial Number")
     ),
     "chassis-version": KernelNames(
-        "chassis_version", "smbios.chassis.version", None
+        "chassis_version", "smbios.chassis.version", None, (3, "Version")
     ),
     "system-manufacturer": KernelNames(
-        "sys_vendor", "smbios.system.maker", "hw.vendor"
+        "sys_vendor", "smbios.system.maker", "hw.vendor", (1, "Manufacturer")
     ),
     "system-product-name": KernelNames(
-        "product_name", "smbios.system.product", "hw.product"
+        "product_name", "smbios.system.product", "hw.product", (1, "Product")
     ),
     "system-serial-number": KernelNames(
-        "product_serial", "smbios.system.serial", "hw.uuid"
+        "product_serial", "smbios.system.serial", "hw.uuid", (1, "Serial Number")
     ),
     "system-uuid": KernelNames(
-        "product_uuid", "smbios.system.uuid", "hw.uuid"
+        "product_uuid", "smbios.system.uuid", "hw.uuid", (1, "UUID")
     ),
     "system-version": KernelNames(
-        "product_version", "smbios.system.version", None
+        "product_version", "smbios.system.version", None, (1, "Version")
     ),
 }
 
@@ -159,6 +160,32 @@ def _read_sysctl(key: str) -> Optional[str]:
     return None
 
 
+def _read_smbios(key: str) -> Optional[str]:
+    """
+    Reads dmi data from illumos' smbios(1)
+    """
+
+    kmap = DMIDECODE_TO_KERNEL.get(key)
+    if kmap is None or kmap.illumos is None:
+        return None
+
+    (typ, key) = kmap.illumos
+
+    LOG.debug(f"querying dmi data {typ}/{key}")
+
+    cmd = ['smbios', '-t', str(typ)]
+    try:
+        import re
+        (out, _err) = subp.subp(cmd, rcs=[0])
+        m = re.search(rf'^\s*{key}:\s*(.+)\s*$', out, re.MULTILINE)
+        if m:
+            return m.group(1)
+    except subp.ProcessExecutionError as e:
+        LOG.debug('failed smbios cmd: %s\n%s', cmd, e)
+
+    return None
+
+
 def _call_dmidecode(key: str, dmidecode_path: str) -> Optional[str]:
     """
     Calls out to dmidecode to get the data out. This is mostly for supporting
@@ -202,6 +229,9 @@ def read_dmi_data(key: str) -> Optional[str]:
 
     if is_OpenBSD():
         return _read_sysctl(key)
+
+    if is_illumos():
+        return _read_smbios(key)
 
     syspath_value = _read_dmi_syspath(key)
     if syspath_value is not None:

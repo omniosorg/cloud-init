@@ -1,6 +1,7 @@
 import abc
 import logging
 import os
+import re
 
 from cloudinit import net, performance, subp, util
 from cloudinit.distros.parsers import ifconfig
@@ -251,6 +252,48 @@ class FreeBSDNetworking(BSDNetworking):
         if err == "devinfo: {}: Not found\n".format(devname):
             return True
         return False
+
+
+class illumosNetworking(Networking):
+    """Implementation of networking functionality for illumos."""
+
+    def is_physical(self, devname: DeviceName) -> bool:
+        raise NotImplementedError()
+
+    def settle(self, *, exists=None) -> None:
+        """illumos has no equivalent to `udevadm settle`; noop."""
+
+    def try_set_link_up(self, devname: DeviceName) -> bool:
+        raise NotImplementedError()
+
+    def generate_fallback_config(
+        self, *, blacklist_drivers=None, config_driver: bool = False
+    ):
+        nconf = {'config': [], 'version': 1}
+        (out, _) = subp.subp(['/usr/sbin/ipadm', 'show-addr'])
+        for mac, name in net.get_interfaces_by_mac().items():
+            if re.search(rf'^{name}/', out, re.MULTILINE):
+                # Address already configured
+                continue
+            nconf['config'].append(
+                {'type': 'physical', 'name': name,
+                 'mac_address': mac, 'subnets': [{'type': 'dhcp'}]})
+        return nconf
+
+    def apply_network_config_names(self, netcfg: NetworkConfig) -> None:
+        """Read the network config and rename devices accordingly.
+
+        Renames are only attempted for interfaces of type 'physical'. It is
+        expected that the network system will create other devices with the
+        correct name in place.
+        """
+
+        try:
+            self._rename_interfaces(self.extract_physdevs(netcfg))
+        except RuntimeError as e:
+            raise RuntimeError(
+                "Failed to apply network config names: %s" % e
+            ) from e
 
 
 class LinuxNetworking(Networking):
