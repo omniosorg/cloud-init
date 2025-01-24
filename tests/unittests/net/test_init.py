@@ -1370,7 +1370,8 @@ class TestExtractPhysdevs:
 class TestNetFailOver:
     @pytest.fixture(autouse=True)
     def setup(self, mocker):
-        mocker.patch("cloudinit.net.util")
+        m_util = mocker.patch("cloudinit.net.util")
+        m_util.is_illumos.return_value = False
         self.device_driver = mocker.patch("cloudinit.net.device_driver")
         self.read_sys_net = mocker.patch("cloudinit.net.read_sys_net")
 

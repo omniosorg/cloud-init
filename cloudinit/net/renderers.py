@@ -6,6 +6,7 @@ from cloudinit.net import (
     RendererNotFoundError,
     eni,
     freebsd,
+    illumos,
     netbsd,
     netplan,
     network_manager,
@@ -18,6 +19,7 @@ from cloudinit.net import (
 NAME_TO_RENDERER = {
     "eni": eni,
     "freebsd": freebsd,
+    "illumos": illumos,
     "netbsd": netbsd,
     "netplan": netplan,
     "network-manager": network_manager,
@@ -35,6 +37,7 @@ DEFAULT_PRIORITY = [
     "netbsd",
     "openbsd",
     "networkd",
+    "illumos",
 ]
 
 

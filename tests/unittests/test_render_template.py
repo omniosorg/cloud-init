@@ -21,6 +21,7 @@ DISTRO_VARIANTS = [
     "gentoo",
     "mariner",
     "netbsd",
+    "omnios",
     "openbsd",
     "photon",
     "raspberry-pi-os",

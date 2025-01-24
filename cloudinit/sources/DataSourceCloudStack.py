@@ -16,13 +16,12 @@ import logging
 import os
 import time
 from contextlib import suppress
-from socket import gaierror, getaddrinfo, inet_ntoa
-from struct import pack
+from socket import gaierror, getaddrinfo
 
 from cloudinit import dmi, net, performance, sources
 from cloudinit import url_helper as uhelp
 from cloudinit import util
-from cloudinit.net import dhcp
+from cloudinit.net import dhcp, get_default_gateway
 from cloudinit.net.dhcp import NoDHCPLeaseError
 from cloudinit.net.ephemeral import EphemeralIPNetwork
 from cloudinit.sources.helpers import ec2
@@ -303,19 +302,6 @@ def get_data_server():
         return None
     else:
         return addrinfo[0][4][0]  # return IP
-
-
-def get_default_gateway():
-    # Returns the default gateway ip address in the dotted format.
-    lines = util.load_text_file("/proc/net/route").splitlines()
-    for line in lines:
-        items = line.split("\t")
-        if items[1] == "00000000":
-            # Found the default route, get the gateway
-            gw = inet_ntoa(pack("<L", int(items[2], 16)))
-            LOG.debug("Found default route, gateway is %s", gw)
-            return gw
-    return None
 
 
 def get_vr_address(distro):

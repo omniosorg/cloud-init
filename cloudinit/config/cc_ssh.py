@@ -157,6 +157,15 @@ def handle(name: str, cfg: Config, cloud: Cloud, args: list) -> None:
         genkeys = util.get_cfg_option_list(
             cfg, "ssh_genkeytypes", GENERATE_KEY_NAMES
         )
+        if util.is_illumos() and "ssh_genkeytypes" not in cfg:
+            # Delegate generation to ssh-keygen -A, which creates every
+            # host key type supported by the platform's OpenSSH, including
+            # types (e.g. post-quantum) that cloud-init does not know about.
+            try:
+                subp.subp(["/usr/bin/ssh-keygen", "-A"], capture=True)
+            except subp.ProcessExecutionError:
+                util.logexc(LOG, "Failed generating host keys")
+            genkeys = []
         # remove keys that are not supported in fips mode if its enabled
         key_names = (
             genkeys

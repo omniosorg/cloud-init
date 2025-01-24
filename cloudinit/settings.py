@@ -8,6 +8,8 @@
 #
 # This file is part of cloud-init. See LICENSE file for license information.
 
+import platform
+
 # Set and read for determining the cloud config file location
 CFG_ENV_NAME = "CLOUD_CFG"
 
@@ -16,7 +18,10 @@ CLOUD_CONFIG = "/etc/cloud/cloud.cfg"
 
 CLEAN_RUNPARTS_DIR = "/etc/cloud/clean.d"
 
-DEFAULT_RUN_DIR = "/run/cloud-init"
+if platform.system() == "SunOS":
+    DEFAULT_RUN_DIR = "/var/run/cloud-init"
+else:
+    DEFAULT_RUN_DIR = "/run/cloud-init"
 
 # What u get if no config is provided
 CFG_BUILTIN = {

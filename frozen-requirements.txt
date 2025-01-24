@@ -1,0 +1,19 @@
+#
+# This file was automatically produced by updatereqs
+# Generated on Thu Mar 19 16:06:29 UTC 2026
+# Do not edit directly
+#
+certifi==2026.2.25
+charset-normalizer==3.4.6
+configobj==5.0.9
+Jinja2==3.1.6
+jsonpatch==1.33
+jsonpointer==3.0.0
+MarkupSafe==3.0.3
+oauthlib==3.3.1
+packaging==26.0
+passlib==1.7.4
+pyserial==3.5
+requests==2.32.5
+urllib3==2.6.3
+wheel==0.46.3

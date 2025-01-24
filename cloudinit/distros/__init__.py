@@ -98,6 +98,7 @@ OSFAMILIES = {
     ],
     "openeuler": ["openeuler"],
     "OpenCloudOS": ["OpenCloudOS", "TencentOS"],
+    "illumos": ["omnios"],
 }
 
 LOG = logging.getLogger(__name__)

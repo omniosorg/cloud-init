@@ -242,6 +242,15 @@ elif init_system == 'sysvinit_openbsd'
   meson.add_install_script('/usr/sbin/rcctl', 'enable', 'cloudinit')
   meson.add_install_script('/usr/sbin/rcctl', 'enable', 'cloudconfig')
   meson.add_install_script('/usr/sbin/rcctl', 'enable', 'cloudfinal')
+elif init_system == 'smf'
+  # illumos Service Management Facility manifest. The manifest is imported
+  # by the manifest-import service on boot, or by packaging.
+  install_data(
+    run_command(find, 'smf', '-type', 'f', '-name', '*.xml', check: true).stdout().strip().split('\n'),
+    install_dir: 'lib/svc/manifest/system',
+    install_mode: 'rw-r--r--',
+    install_tag: 'smf',
+  )
 endif
 
 custom_target(
